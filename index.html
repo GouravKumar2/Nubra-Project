@@ -820,7 +820,8 @@
         const maxProfit = o => o.type == 'call' ? Infinity : (o.strike - o.premium) * o.lotSize * o.lots;
         const TODAY = (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()) })();
         const dayAt = d => new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + d);
-        const dstr = d => { const x = dayAt(d); return x.getDate() + ' ' + x.toLocaleString('en-GB', { month: 'short' }) };
+        const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const dstr = d => { const x = dayAt(d); return DOW[x.getDay()] + ', ' + x.getDate() + ' ' + MON[x.getMonth()] };
         const D1 = (() => { let d = 3; while (dayAt(d).getDay() != 4) d++; return d })();
         const EXPIRIES = [D1, D1 + 7, D1 + 21];
         const chg = '<p class="mut" style="font-size:12px;margin:16px 0 0">Illustrative prices. Brokerage, taxes and other charges are not included.</p>';
@@ -832,7 +833,7 @@
             })
         }
         // ---- state
-        const S = { step: 1, stock: null, view: null, notsure: false, days: null, capital: 100000, comfy: null, opt: null, lots: 1, ack: false, move: 10, pick: null, typed: '', chk: false, done: false, note: '', time: false };
+        const S = { step: 1, stock: null, view: null, notsure: false, days: null, capital: 100000, comfy: null, cm: false, ctext: '', cv: null, opt: null, lots: 1, ack: false, move: 10, pick: null, typed: '', chk: false, done: false, note: '', time: false };
         const V = { pick: null, anim: false, hint: true };
         const STEPS = ['Your view', 'Your limit', 'Choose option', 'Worst case', 'Review'];
         const INTRO = { 1: ['option', 'call/put'], 2: ['fee'], 3: ['strike', 'expiry'], 4: ['be'] };
@@ -872,10 +873,11 @@
             h += `<div class="sec"><h2>Your view on ${st.s}</h2><div class="opts c3">${[['up', 'It will rise'], ['down', 'It will fall'], ['ns', "I'm not sure"]].map(([k, l]) => `<button class="opt" data-view="${k}" aria-pressed="${(S.notsure ? 'ns' : S.view) == k}"><b>${l}</b></button>`).join('')}</div>
  ${S.notsure ? `<p class="help">No rush. You can explore with a mock trade or come back later. You can also continue without a view and compare both on the next steps.</p>` : ''}</div>`;
             if (S.view || S.notsure) {
-                const c = type(), oc = c == 'call' ? 'put' : 'call';
-                h += `<div class="sec"><h2>By roughly when?</h2><div class="opts c3">${days.map(d => `<button class="opt" data-days="${d}" aria-pressed="${S.days == d}"><b>${['This week', 'In 2 weeks', 'This month'][days.indexOf(d)]}</b><div class="mut">${dstr(d)}</div></button>`).join('')}</div></div>
+                const c = type(), oc = c == 'call' ? 'put' : 'call', atm = S.days != null ? chain(st, c, S.days).map(x => x.o).reduce((a, b) => Math.abs(b.strike - st.p) < Math.abs(a.strike - st.p) ? b : a) : null;
+                h += `<div class="sec"><h2>Roughly when do you expect it to happen?</h2><div class="opts c3">${days.map((d, i) => `<button class="opt" data-days="${d}" aria-pressed="${S.days == d}"><span class="mut" style="font-size:12px">${['Nearest expiry', 'Following week', 'Later expiry'][i]}</span><div class="n" style="font-size:20px;font-weight:800;margin:2px 0">${dstr(d)}</div><div class="mut">in ${d} day${d == 1 ? '' : 's'}</div></button>`).join('')}</div></div>
  <div class="sec"><h2>Illustrative comparison</h2><div class="cmp"><div class="tile"><b>Buying ${st.l} shares</b><div class="big n">${INR(st.p * st.l)}</div><div class="mut">invested. You'd lose money if the price falls, and could lose a large part in a big fall.</div></div>
- <div class="tile"><b>Reserving a price on 1 lot</b><div class="big n">${INR(chain(st, c, EXPIRIES[1])[0].o.premium * st.l)}</div><div class="mut">option price. The most you can lose is the option price you pay.</div></div></div>
+ <div class="tile"><b>Reserving a price on 1 lot</b><div class="big n">${atm ? INR(atm.premium * st.l) : '—'}</div><div class="mut">${atm ? 'option price. The most you can lose is the option price you pay.' : 'Pick a date above to see the option price.'}</div></div></div>
+ <p class="mut" style="margin:10px 0 0;font-size:13px">${atm ? `Compared: buying ${st.l} ${st.s} shares at ${INR(st.p)} each, against 1 lot (${st.l} shares) of the ${INR(atm.strike)} ${c == 'call' ? 'Call' : 'Put'} option, the locked price closest to today's price, expiring ${dstr(S.days)} at ${PS(atm.premium)} per share.${S.view ? '' : ' Showing a Call; you can compare both on the next steps.'}` : `Pick a date above and we'll compare ${st.l} ${st.s} shares with 1 lot of the option whose locked price is closest to today's price.`}</p>
  <p class="help">Shares and options carry different risks and rewards. An option is not a cheaper copy of owning the shares.</p><p class="help">An option is a contract. You pay an upfront price, called the premium, for the right to buy (or sell) a stock at a fixed price until a deadline. ${S.view ? `Your view means ${T(c)}; the opposite is a ${TERMS[oc][1]}.` : 'A Call reserves the right to buy, a Put the right to sell. You can compare both next.'}</p></div>`
             }
             return h + foot((S.view || S.notsure) && S.days != null, !(S.view || S.notsure) ? 'Choose what you expect to continue' : 'Pick a timeframe to continue')
@@ -884,15 +886,27 @@
         const phrase = o => o.type == 'call' ? { go: 'goes above', not: "doesn't go above", stay: 'stays below' } : { go: 'falls below', not: "doesn't fall below", stay: 'stays above' };
         const comfyTxt = v => `${INR(v)} <small>that's ${PCT(v, S.capital)} of your capital</small>`;
         const PRE = [1000, 2500, 5000];
+        const fmtIN = n => Number(n).toLocaleString('en-IN');
+        const cval = () => { const t = (S.ctext || '').replace(/[,\s₹]/g, ''); return /^\d+$/.test(t) ? +t : NaN };
+        const cvalid = n => Number.isInteger(n) && n >= 500 && n <= S.capital;
+        const cmsg = () => `Enter an amount between ₹500 and ${INR(S.capital)}`;
         function s2() {
-            const cm = S.comfy ?? 5000;
+            const cm = S.comfy ?? 5000, ok = !S.cm || cvalid(cval());
             return back() + note() + `<h1><span class="gr">How much are you comfortable losing on this one trade?</span></h1>
  <label class="mut" for="cap">Your total capital</label><input type="number" id="cap" min="10000" step="5000" value="${S.capital}" style="margin:6px 0 16px;max-width:240px">
- <div class="opts" style="grid-template-columns:repeat(4,1fr)">${PRE.map(v => `<button class="opt" data-comfy="${v}" aria-pressed="${S.comfy == v}"><b class="n">${INR(v)}</b></button>`).join('')}<button class="opt" data-comfy="0" aria-pressed="${S.comfy != null && !PRE.includes(S.comfy)}"><b>Custom</b></button></div>
+ <div class="opts" style="grid-template-columns:repeat(4,1fr)">${PRE.map(v => `<button class="opt" data-comfy="${v}" aria-pressed="${!S.cm && S.comfy == v}"><b class="n">${INR(v)}</b></button>`).join('')}<button class="opt" data-comfy="0" aria-pressed="${!!S.cm}"><b>Custom</b></button></div>
+ <div id="cw" ${S.cm ? '' : 'hidden'} style="margin-top:12px;max-width:260px"><div style="position:relative"><span aria-hidden="true" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--mu)">₹</span><input type="text" id="ci" inputmode="numeric" autocomplete="off" aria-label="Custom amount in rupees" aria-describedby="cmsg" value="${S.ctext || ''}" style="padding-left:28px"></div><p class="mut" id="cmsg" style="margin:6px 0 0;min-height:20px;font-size:13px">${S.cm && !ok ? cmsg() : ''}</p></div>
  <input type="range" id="cr" min="500" max="${Math.max(10000, S.capital * .1)}" step="500" value="${cm}" aria-label="Comfortable loss" style="margin-top:16px">
- <p class="big n" style="margin:8px 0 0" id="cro">${comfyTxt(cm)}</p>
+ <p class="big n" style="margin:8px 0 0" id="cro">${ok && S.comfy != null ? comfyTxt(S.comfy) : '—'}</p>
  <p class="mut">Many first-timers keep a single trade under 2 to 5% of their capital.</p>
- <p class="help">This will be the ceiling for your trade, and we'll flag anything that costs more. What you pay for an option is called the ${T('fee')}.</p>` + foot(S.comfy != null, 'Choose an amount to continue')
+ <p class="help">This will be the ceiling for your trade, and we'll flag anything that costs more. What you pay for an option is called the ${T('fee')}.</p>` + foot(S.comfy != null && ok, S.cm && !ok ? cmsg() : 'Choose an amount to continue')
+        }
+        function upd2() {
+            const m = $('#main'), n = cval(), ok = !S.cm || cvalid(n);
+            m.querySelectorAll('[data-comfy]').forEach(b => { const v = +b.dataset.comfy; b.setAttribute('aria-pressed', v ? (!S.cm && S.comfy == v) : !!S.cm) });
+            $('#cw').hidden = !S.cm; $('#cmsg').textContent = S.cm && !ok ? cmsg() : '';
+            $('#cro').innerHTML = ok && S.comfy != null ? comfyTxt(S.comfy) : '—';
+            refreshFoot(S.comfy != null && ok, S.cm && !ok ? cmsg() : 'Choose an amount to continue'); slip()
         }
         function s3() {
             const st = stk(), cs = chain(st, type(), S.days), lot = st.l, sel = S.opt != null ? cs[S.opt] : null, sh = st.s, call = type() == 'call';
@@ -1052,7 +1066,7 @@
         function slipModel(S, step) {
             const m = { stock: null, view: null, days: null, comfy: null, o: null };
             if (step >= 1) { m.stock = S.stock; m.view = S.view; m.days = S.days; m.notsure = !S.view && S.notsure }
-            if (step >= 2) m.comfy = S.comfy;
+            if (step >= 3) m.comfy = S.comfy;
             if (step >= 3 && S.stock != null && (S.view || S.notsure) && S.days != null && S.opt != null) { const c = chain(STOCKS[S.stock], type(), S.days)[S.opt]; if (!(c.o.premium * c.o.lotSize * S.lots > S.comfy && !S.ack)) m.o = { ...c.o, lots: S.lots } }
             return m
         }
@@ -1103,14 +1117,20 @@
             m.querySelectorAll('[data-stock]').forEach(b => b.onclick = () => { const i = +b.dataset.stock; if (S.stock != i) { S.stock = i; reset(3, S.opt != null ? 'Stock changed, so your option choice was cleared.' : '') } render() });
             m.querySelectorAll('[data-view]').forEach(b => b.onclick = () => { const v = b.dataset.view; if (v == 'ns') { S.notsure = true; if (S.view) { S.view = null; reset(3, S.opt != null ? 'View changed, so your option choice was cleared.' : '') } } else { S.notsure = false; if (S.view != v) { S.view = v; reset(3, S.opt != null ? 'View changed, so your option choice was cleared.' : '') } } render() });
             m.querySelectorAll('[data-days]').forEach(b => b.onclick = () => { const d = +b.dataset.days; if (S.days != d) { S.days = d; reset(3, S.opt != null ? 'Timeframe changed, so your option choice was cleared.' : '') } render() });
-            m.querySelectorAll('[data-comfy]').forEach(b => b.onclick = () => { const v = +b.dataset.comfy; S.comfy = v || S.comfy || 3000; S.ack = false; render() });
+            m.querySelectorAll('[data-comfy]').forEach(b => b.onclick = () => { const v = +b.dataset.comfy; S.ack = false; if (v) { S.cm = false; S.comfy = v } else { S.cm = true; const n = cval(); if (cvalid(n)) { S.comfy = n; S.cv = n } } render(); if (!v) { const c = $('#ci'); if (c) { c.focus(); c.setSelectionRange(c.value.length, c.value.length) } } });
             m.querySelectorAll('[data-opt]').forEach(b => b.onclick = () => { S.opt = +b.dataset.opt; S.ack = false; render() });
             m.querySelectorAll('[data-ack]').forEach(b => b.onclick = () => { S.opt = +b.dataset.ack; S.ack = true; render(); const n = document.querySelector('[data-ack]'); if (n) n.focus() });
             m.querySelectorAll('[data-lot]').forEach(b => b.onclick = () => { const d = b.dataset.lot; S.lots = Math.min(20, Math.max(1, S.lots + +d)); S.ack = false; render(); const n = document.querySelector(`[data-lot="${d}"]`); if (n) n.focus() });
-            m.querySelectorAll('[data-a]').forEach(b => b.onclick = () => { const a = b.dataset.a; if (a == 'back') S.step--; else if (a == 'next') { S.step++; S.note = ''; V.pick = null } else if (a == 'review') { S.done = false } else if (a == 'again') { Object.assign(S, { step: 1, stock: null, view: null, notsure: false, days: null, comfy: null, opt: null, lots: 1, ack: false, typed: '', chk: false, done: false, note: '', q: '' }); Object.assign(V, { pick: null, anim: false, hint: true }) } V.anim = false; V.hint = true; render(); window.scrollTo({ top: 0 }) });
+            m.querySelectorAll('[data-a]').forEach(b => b.onclick = () => { const a = b.dataset.a; if (a == 'back') S.step--; else if (a == 'next') { S.step++; S.note = ''; V.pick = null } else if (a == 'review') { S.done = false } else if (a == 'again') { Object.assign(S, { step: 1, stock: null, view: null, notsure: false, days: null, comfy: null, cm: false, ctext: '', cv: null, opt: null, lots: 1, ack: false, typed: '', chk: false, done: false, note: '', q: '' }); Object.assign(V, { pick: null, anim: false, hint: true }) } V.anim = false; V.hint = true; render(); window.scrollTo({ top: 0 }) });
             const q = $('#q'); if (q) q.oninput = () => { S.q = q.value; const p = q.selectionStart; render(); const n = $('#q'); n.focus(); n.setSelectionRange(p, p) };
-            const cap = $('#cap'); if (cap) cap.onchange = () => { S.capital = Math.max(10000, +cap.value || 100000); render() };
-            const cr = $('#cr'); if (cr) cr.addEventListener('input', () => { S.comfy = +cr.value; S.ack = false; $('#cro').innerHTML = comfyTxt(S.comfy); m.querySelectorAll('[data-comfy]').forEach(b => { const v = +b.dataset.comfy; b.setAttribute('aria-pressed', v ? S.comfy == v : !PRE.includes(S.comfy)) }); refreshFoot(true, ''); slip() });
+            const cap = $('#cap'); if (cap) cap.onchange = () => { S.capital = Math.max(10000, +cap.value || 100000); if (S.comfy != null && S.comfy > S.capital) { S.comfy = S.capital; S.ack = false; S.note = `Your limit was lowered to ${INR(S.capital)} to match your capital.`; if (S.cm) { S.cv = S.capital; S.ctext = fmtIN(S.capital) } } render() };
+            const cr = $('#cr'); if (cr) cr.addEventListener('input', () => { S.comfy = +cr.value; S.cv = S.comfy; S.cm = true; S.ctext = fmtIN(S.comfy); S.ack = false; const ci = $('#ci'); if (ci) ci.value = S.ctext; upd2() });
+            const ci = $('#ci'); if (ci) ci.addEventListener('input', () => {
+                const raw = ci.value, pos = ci.selectionStart, dB = raw.slice(0, pos).replace(/\D/g, '').length;
+                if (raw.includes('.')) { S.ctext = raw.replace(/[^\d.,]/g, '') } else { const dg = raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '').slice(0, 9); S.ctext = dg ? fmtIN(+dg) : '' }
+                ci.value = S.ctext; if (!raw.includes('.')) { let c = 0, i = 0; for (; i < S.ctext.length && c < dB; i++)if (/\d/.test(S.ctext[i])) c++; ci.setSelectionRange(i, i) }
+                const n = cval(); if (cvalid(n)) { S.comfy = n; S.cv = n; if (cr) cr.value = n } S.ack = false; upd2()
+            });
             m.querySelectorAll('[data-nst]').forEach(b => b.onclick = () => { S.nsType = b.dataset.nst; reset(3, S.opt != null ? 'Call or put changed, so your option choice was cleared.' : ''); render() });
             bindChart(); bindHold()
         }
